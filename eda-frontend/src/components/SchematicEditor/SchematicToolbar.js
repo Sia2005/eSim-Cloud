@@ -590,6 +590,90 @@ export default function SchematicToolbar ({
     a.setAttribute('target', '_blank')
     a.dispatchEvent(evt)
   } 
+  // LTspice .asc symbol mapping (eSim component name -> LTspice symbol)
+  const ltspiceSymbolMap = {
+    Resistor: 'res',
+    Capacitor: 'cap',
+    Inductor: 'ind',
+    VoltageSource: 'voltage',
+    Vdc: 'voltage',
+    Vac: 'voltage',
+    Vsource: 'voltage',
+    CurrentSource: 'current',
+    Idc: 'current',
+    Ground: '',
+    GND: '',
+    Diode: 'diode',
+    NPN: 'npn',
+    PNP: 'pnp',
+    NMOS: 'nmos',
+    PMOS: 'pmos',
+    OpAmp: 'OpAmps\\\\opamp'
+  }
+
+  // Convert eSim schematic to LTspice .asc format
+  function generateLTspiceAsc () {
+    const output = []
+    output.push('Version 4')
+    output.push('SHEET 1 880 680')
+
+    if (!window.graph) {
+      return output.join('\n')
+    }
+    const model = window.graph.getModel()
+    const cells = model.cells
+
+    let sequence = 1
+    for (const cellId in cells) {
+      const cell = cells[cellId]
+      if (!cell || !cell.Component) continue
+
+      const compType = cell.symbol || cell.name || 'Resistor'
+      const ltSymbol = ltspiceSymbolMap[compType] !== undefined
+        ? ltspiceSymbolMap[compType]
+        : 'res'
+
+      if (ltSymbol === '') {
+        // Ground: emit as flag
+        const geo = cell.getGeometry ? cell.getGeometry() : { x: 0, y: 0 }
+        const x = Math.round((geo.x || 0) / 8) * 16
+        const y = Math.round((geo.y || 0) / 8) * 16
+        output.push(`FLAG ${x} ${y} 0`)
+        continue
+      }
+
+      const geo = cell.getGeometry ? cell.getGeometry() : { x: 0, y: 0 }
+      const x = Math.round((geo.x || 0) / 8) * 16
+      const y = Math.round((geo.y || 0) / 8) * 16
+      output.push(`SYMBOL ${ltSymbol} ${x} ${y} R0`)
+
+      const refName = cell.reference || (compType.charAt(0).toUpperCase() + sequence)
+      output.push(`SYMATTR InstName ${refName}`)
+
+      const value = cell.value || cell.componentValue || ''
+      if (value) {
+        output.push(`SYMATTR Value ${value}`)
+      }
+      sequence++
+    }
+
+    // Wires (edges)
+    for (const cellId in cells) {
+      const cell = cells[cellId]
+      if (!cell || !cell.edge) continue
+      const source = cell.source && cell.source.geometry ? cell.source.geometry : null
+      const target = cell.target && cell.target.geometry ? cell.target.geometry : null
+      if (source && target) {
+        const x1 = Math.round(source.x / 8) * 16
+        const y1 = Math.round(source.y / 8) * 16
+        const x2 = Math.round(target.x / 8) * 16
+        const y2 = Math.round(target.y / 8) * 16
+        output.push(`WIRE ${x1} ${y1} ${x2} ${y2}`)
+      }
+    }
+
+    return output.join('\n')
+  }
 
   const [imgopen, setImgOpen] = React.useState(false)
 
@@ -752,7 +836,17 @@ export default function SchematicToolbar ({
         console.error('PDF export error:', e)
         alert('Failed to generate PDF: ' + e.message)
       })
+    } else if (value === 'LTSPICE') {
+      // Generate LTspice .asc file
+      try {
+        const ascText = generateLTspiceAsc()
+        downloadText([ascText], { type: 'text/plain;charset=utf-8;' }, '.asc')
+      } catch (e) {
+        console.error('LTspice export error:', e)
+        alert('Failed to generate LTspice file: ' + e.message)
+      }
     }
+    
   }
 
   // handle Save Schematic onCloud
